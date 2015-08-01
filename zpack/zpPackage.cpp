@@ -314,7 +314,7 @@ bool Package::addFile(const Char* filename, const Char* externalFilename, u32 fi
 			FileEntry& dstEntry = getFileEntry(insertedIndex);
 			dstEntry.packSize = writeCompressFile(m_stream, entry.byteOffset, file, dstEntry.originSize, chunkSize, dstEntry.flag,
 												m_chunkData, m_compressBuffer, m_chunkPosBuffer);
-			//temp
+			//not proud of this
 			if (m_packageEnd == dstEntry.byteOffset + dstEntry.originSize)
 			{
 				m_packageEnd = dstEntry.byteOffset + dstEntry.packSize;
@@ -850,7 +850,8 @@ bool Package::buildHashTable()
 		while (m_hashTable[index] != -1)
 		{
 			const FileEntry& conflictEntry = getFileEntry(m_hashTable[index]);
-			if (!wrong && (conflictEntry.flag & FILE_DELETE) == 0
+			if ((conflictEntry.flag & FILE_DELETE) == 0
+				&&(currentEntry.flag & FILE_DELETE) == 0 
 				&& conflictEntry.nameHash == currentEntry.nameHash)
 			{
 				wrong = true;
@@ -883,11 +884,10 @@ int Package::getFileIndex(u64 nameHash) const
 		const FileEntry& entry = getFileEntry(fileIndex);
 		if (entry.nameHash == nameHash)
 		{
-			if ((entry.flag & FILE_DELETE) != 0)
+			if ((entry.flag & FILE_DELETE) == 0)
 			{
-				return -1;
+				return fileIndex;
 			}
-			return fileIndex;
 		}
 		if (++hashIndex >= m_hashTable.size())
 		{
@@ -907,22 +907,24 @@ u32 Package::insertFileEntry(FileEntry& entry, const Char* filename)
 	//file with 0 size will alway be put to the end
 	for (u32 fileIndex = 0; fileIndex < maxIndex; ++fileIndex)
 	{
-		FileEntry& thisEntry = getFileEntry(fileIndex);
+		FileEntry* thisEntry = &getFileEntry(fileIndex);
 		//avoid overwritting old file entries and filenames
-		if (thisEntry.byteOffset >= lastEnd + entry.packSize
+		if (thisEntry->byteOffset >= lastEnd + entry.packSize
 			&& (lastEnd + entry.packSize <= m_header.fileEntryOffset
 				|| lastEnd >= m_header.filenameOffset + m_header.allFilenameSize))
 		{
 			entry.byteOffset = lastEnd;
 			m_fileEntries.insert(m_fileEntries.begin() + fileIndex * m_header.fileEntrySize, m_header.fileEntrySize, 0);
-			thisEntry = entry;
+			//buffer may be reallocated
+			thisEntry = &getFileEntry(fileIndex);
+			*thisEntry = entry;
 			m_filenames.insert(m_filenames.begin() + fileIndex, filename);
 			assert(m_filenames.size() == getFileCount());
 			//user may call addFile or removeFile before calling flush, so hash table need to be fixed
 			fixHashTable(fileIndex);
 			return fileIndex;
 		}
-		lastEnd = thisEntry.byteOffset + thisEntry.packSize;
+		lastEnd = thisEntry->byteOffset + thisEntry->packSize;
 	}
 
 	if (m_header.fileCount == 0 || m_header.fileEntryOffset > lastEnd + entry.packSize)
